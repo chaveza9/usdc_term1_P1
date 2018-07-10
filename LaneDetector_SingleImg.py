@@ -130,6 +130,28 @@ def draw_lines(img, lines, color=[255, 0, 0], thickness=10):
     for x1,y1,x2,y2 in lane_lines:
         cv2.line(img, (x1, y1), (x2, y2), color, thickness)
         
+def draw_lines_plain(img, lines, color=[255, 0, 0], thickness=10):
+    """
+    NOTE: this is the function you might want to use as a starting point once 
+    you want to average/extrapolate the line segments you detect to map out the 
+    full extent of the lane (going from the result shown in 
+    raw-lines-example.mp4 to that shown in P1_example.mp4).  
+    
+    Think about things like separating line segments by their 
+    slope ((y2-y1)/(x2-x1)) to decide which segments are part of the left
+    line vs. the right line.  Then, you can average the position of each of 
+    the lines and extrapolate to the top and bottom of the lane.
+    
+    This function draws `lines` with `color` and `thickness`.    
+    Lines are drawn on the image inplace (mutates the image).
+    If you want to make the lines semi-transparent, think about combining
+    this function with the weighted_img() function below
+    """
+
+    for line in lines:
+        for x1,y1,x2,y2 in line:
+            cv2.line(img, (x1, y1), (x2, y2), color, thickness)
+        
 
 def hough_lines(img, rho, theta, threshold, min_line_len, max_line_gap):
     """
@@ -141,6 +163,7 @@ def hough_lines(img, rho, theta, threshold, min_line_len, max_line_gap):
                         minLineLength=min_line_len, maxLineGap=max_line_gap)
     line_img = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
     draw_lines(line_img, lines)
+    #draw_lines_plain(line_img, lines)
     return line_img
 
 def weighted_img(img, initial_img, α=0.8, β=1., γ=0.):
@@ -291,7 +314,35 @@ def fit_line(lines):
     right['coef'] = [m,b]
     
     return np.array(left['coef']).T,np.array(right['coef']).T
-   
+
+def mask_color_lanes(img):
+    """
+    mask_color_lanes(img)
+    Applies a color based mask to an rgb image by converting it to an HSV color
+    image
+    ---------------------------------------------------------------------------
+    INPUT:
+        img: RGB color image
+    OUTPUT:
+        maskedImg: Single Channel Masked image
+    ===========================================================================
+    """
+    hlsImg = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
+    # Define Upper and Lower Thresholds for white and yellow lanes
+    white = {'low':np.uint8([  0, 220,   0]),'up':np.uint8([255, 255, 255])}
+    yellow = {'low':np.uint8([0, 0, 150]),'up':np.uint8([80, 255, 255])}
+    
+    # Apply a mask by filtering colors that are in range
+    white_mask = cv2.inRange(hlsImg, white['low'], white['up'])  
+    yellow_mask = cv2.inRange(hlsImg,  yellow['low'], yellow['up'])
+    
+    # Combine masks
+    mask = cv2.bitwise_or(white_mask, yellow_mask)
+    
+    # Apply mask to image
+    maskedImg = cv2.bitwise_and(img, img, mask=mask)
+    
+    return maskedImg
     
 
 if __name__== "__main__":
@@ -300,18 +351,18 @@ if __name__== "__main__":
     rgbImgs = read_image_set("test_images/") # RGB images
     show_image_list(rgbImgs,'RBG Images')    
     # Convert Images into Greyscale
-    greyImgs = list(map(lambda img: grayscale(img) , rgbImgs))
-    show_image_list(greyImgs,'Greyscale Images')
+    hlsImgs = list(map(lambda img: cv2.cvtColor(img, cv2.COLOR_RGB2HLS) , rgbImgs))
+    show_image_list(hlsImgs,'HLS Images')
+    clrMaskImgs = list(map(lambda img: mask_color_lanes(img) , rgbImgs))
+    show_image_list(clrMaskImgs,'Masked Images')
+    grayImgs = list(map(lambda img: grayscale(img) , clrMaskImgs))
+    show_image_list(grayImgs,'Greyscale Images')
     # Filter Image using Gaussian Smoothing
-    blur_grayImgs = list(map(lambda img: gaussian_blur(img,kernel_size=9), greyImgs ))
+    blur_grayImgs = list(map(lambda img: gaussian_blur(img,kernel_size=9), grayImgs ))
     show_image_list(blur_grayImgs,'Blur Gray Images')
     # Define our parameters for Canny and apply
-    low_threshold = 50
-    high_threshold = 150
-#    cannyImgs = list(map(lambda img: canny(img,low_threshold,high_threshold), 
-#                             blur_grayImgs))
     cannyImgs = list(map(lambda img: auto_canny(img),blur_grayImgs))
-    show_image_list(cannyImgs)
+    show_image_list(cannyImgs, 'Canny Edge Detection')
     
     # Apply Mask
     imshape = rgbImgs[0].shape
@@ -345,7 +396,9 @@ if __name__== "__main__":
     show_image_list(hough_linesImgs,'Hough Lines')
      
     outputImgs = list(map(lambda img, init_img: weighted_img(img,init_img) ,hough_linesImgs,rgbImgs))
-     
+    
+    show_image_list(outputImgs,'Hough Lines')
+    
     for i,img in enumerate(outputImgs):
         plt.figure()
         plt.imshow(img,cmap='gray')
